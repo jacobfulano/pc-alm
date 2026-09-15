@@ -15,3 +15,6 @@ __pycache__/
 data/
 results/
 logs/
+wandb/
+*.pt
+*.ckpt

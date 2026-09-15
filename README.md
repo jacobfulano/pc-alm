@@ -5,7 +5,7 @@
 > **PC-ALM** aligns local predictive-coding updates with backpropagation by
 > accumulating layer-local constraint errors in Lagrange multipliers.
 
-Official JAX reference implementation of
+PyTorch port of the official JAX reference implementation of
 **Augmented Lagrangian Predictive Coding**.
 
 [![arXiv](https://img.shields.io/badge/arXiv-2605.31022-b31b1b?style=flat-square)](https://arxiv.org/abs/2605.31022)
@@ -31,9 +31,16 @@ uv sync --extra test
 uv run pytest
 ```
 
-For NVIDIA GPUs, install a matching [JAX CUDA build](https://docs.jax.dev/en/latest/installation.html#nvidia-gpu)
-with `uv pip install` after syncing. Use `uv run --no-sync` for the commands below
-to preserve that build.
+The default environment uses CPU PyTorch. On a Linux NVIDIA host, install the
+locked CUDA 13 build instead:
+
+```bash
+uv sync --no-group cpu --group gpu --extra test
+uv run --no-sync pytest
+```
+
+Training selects CUDA when it is available and otherwise falls back to CPU.
+Pass `--device cpu` or `--device cuda` to require a particular device.
 
 ## Data
 
@@ -72,7 +79,8 @@ uv run python scripts/run_headline_grid.py --config configs/headline_fashion.yam
   --output-dir results/repro_fashion_n32_l32 --data-dir data
 ```
 
-Expected results (CPU reference run; small numerical differences are normal):
+Expected results from the original JAX CPU reference run are shown below;
+framework and device differences can change the exact values:
 
 | Method | Test accuracy | Gradient cosine to BP |
 |---|---:|---:|

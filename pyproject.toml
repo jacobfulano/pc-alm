@@ -1,10 +1,9 @@
 [project]
 name = "pc-alm"
 version = "0.1.0"
-description = "Augmented Lagrangian Predictive Coding (PC-ALM): clean JAX reference implementation."
+description = "Augmented Lagrangian Predictive Coding (PC-ALM): clean PyTorch reference implementation."
 requires-python = ">=3.10,<3.13"
 dependencies = [
-  "jax>=0.4.26",
   "numpy>=1.24",
   "matplotlib>=3.7",
   "pyyaml>=6.0",
@@ -20,6 +19,30 @@ test = [
 # the source tree via `pythonpath` below.
 [tool.uv]
 package = false
+default-groups = ["cpu"]
+conflicts = [
+  [{ group = "cpu" }, { group = "gpu" }],
+]
+
+[dependency-groups]
+cpu = ["torch==2.13.*"]
+gpu = ["torch==2.13.*"]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.uv.sources]
+torch = [
+  { index = "pytorch-cpu", group = "cpu", marker = "sys_platform == 'linux'" },
+  { index = "pytorch-cu130", group = "gpu", marker = "sys_platform == 'linux'" },
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

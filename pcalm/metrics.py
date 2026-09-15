@@ -1,30 +1,27 @@
 from __future__ import annotations
 
-import jax
-import jax.numpy as jnp
+import torch
 
 
-def mse_ce_accuracy(logits: jax.Array, y: jax.Array):
-    mse = 0.5 * jnp.mean(jnp.sum((logits - y) ** 2, axis=-1))
-    ce = -jnp.mean(jnp.sum(y * jax.nn.log_softmax(logits, axis=-1), axis=-1))
-    acc = jnp.mean(jnp.argmax(logits, axis=-1) == jnp.argmax(y, axis=-1))
+def mse_ce_accuracy(logits: torch.Tensor, y: torch.Tensor):
+    mse = 0.5 * torch.mean(torch.sum((logits - y) ** 2, dim=-1))
+    ce = -torch.mean(torch.sum(y * torch.log_softmax(logits, dim=-1), dim=-1))
+    acc = torch.mean((torch.argmax(logits, dim=-1) == torch.argmax(y, dim=-1)).float())
     return mse, ce, acc
 
 
-def tree_l2(tree) -> jax.Array:
-    leaves = jax.tree_util.tree_leaves(tree)
-    if not leaves:
-        return jnp.asarray(0.0)
-    return jnp.sqrt(jnp.sum(jnp.stack([jnp.sum(x * x) for x in leaves])))
+def tree_l2(tree: list[torch.Tensor]) -> torch.Tensor:
+    if not tree:
+        return torch.tensor(0.0)
+    return torch.sqrt(torch.stack([torch.sum(x * x) for x in tree]).sum())
 
 
-def tree_dot(a, b) -> jax.Array:
-    leaves_a = jax.tree_util.tree_leaves(a)
-    leaves_b = jax.tree_util.tree_leaves(b)
-    if not leaves_a:
-        return jnp.asarray(0.0)
-    return jnp.sum(jnp.stack([jnp.sum(x * y) for x, y in zip(leaves_a, leaves_b)]))
+def tree_dot(a: list[torch.Tensor], b: list[torch.Tensor]) -> torch.Tensor:
+    if not a:
+        return torch.tensor(0.0)
+    return torch.stack([torch.sum(x * y) for x, y in zip(a, b, strict=True)]).sum()
 
 
-def tree_cos(a, b) -> jax.Array:
-    return tree_dot(a, b) / jnp.maximum(tree_l2(a) * tree_l2(b), 1e-30)
+def tree_cos(a: list[torch.Tensor], b: list[torch.Tensor]) -> torch.Tensor:
+    denominator = torch.clamp(tree_l2(a) * tree_l2(b), min=1e-30)
+    return tree_dot(a, b) / denominator

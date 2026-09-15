@@ -1,0 +1,32 @@
+spec_version: 1
+name: pc-alm-pytorch-tests
+project: pc-alm
+
+# `deploy submit --build deploy/run_tests.yaml` replaces this tag with the
+# exact clean-commit image built and pushed from the current checkout.
+image:
+  ref: us-docker.pkg.dev/flourish-gpu/flourish/pc-alm:latest
+
+entrypoint: >
+  pytest -q &&
+  python train.py --config configs/smoke.yaml --device cuda
+  --output-dir /tmp/pc-alm-smoke
+
+env:
+  PCALM_TEST_DEVICE: cuda
+  CUBLAS_WORKSPACE_CONFIG: ":4096:8"
+
+resources:
+  nodes: 1
+  gpus_per_node: 1
+  gpu_type: any
+
+data:
+  output_logs: gs://flourish-runs/{run_id}/logs/
+
+scheduling:
+  queue: experiments
+  priority: 100
+  time_limit_hours: 1
+  max_restarts: 0
+  restart_policy: never

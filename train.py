@@ -9,7 +9,9 @@ from pcalm.training import train_one
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train a residual MLP with BP, PC, or PC-ALM.")
+    parser = argparse.ArgumentParser(
+        description="Train a residual MLP with BP, PC, or PC-ALM."
+    )
     parser.add_argument("--config", type=Path)
     parser.add_argument("--dataset", choices=["synthetic", "mnist", "fashion_mnist"])
     parser.add_argument("--method", choices=["bp", "pc", "pcalm"])
@@ -25,11 +27,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int)
     parser.add_argument("--learning-rate", type=float)
     parser.add_argument("--eta0", type=float)
-    parser.add_argument("--gamma0", type=float, help="Fixed at 1 in this reference implementation.")
+    parser.add_argument(
+        "--gamma0", type=float, help="Fixed at 1 in this reference implementation."
+    )
     parser.add_argument("--train-subset", type=int)
     parser.add_argument("--test-subset", type=int)
     parser.add_argument("--output-dir", type=str)
     parser.add_argument("--data-dir", type=str, default="data")
+    parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
     return parser.parse_args()
 
 
@@ -64,11 +69,18 @@ def main() -> None:
     }
     config = replace(
         config,
-        model=replace(config.model, **{k: v for k, v in model_updates.items() if v is not None}),
-        method=replace(config.method, **{k: v for k, v in method_updates.items() if v is not None}),
-        training=replace(config.training, **{k: v for k, v in training_updates.items() if v is not None}),
+        model=replace(
+            config.model, **{k: v for k, v in model_updates.items() if v is not None}
+        ),
+        method=replace(
+            config.method, **{k: v for k, v in method_updates.items() if v is not None}
+        ),
+        training=replace(
+            config.training,
+            **{k: v for k, v in training_updates.items() if v is not None},
+        ),
     )
-    summary = train_one(config, data_dir=args.data_dir)
+    summary = train_one(config, data_dir=args.data_dir, device=args.device)
     print(summary)
 
 

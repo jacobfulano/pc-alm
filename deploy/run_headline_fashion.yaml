@@ -1,0 +1,41 @@
+spec_version: 1
+name: pc-alm-fashion-n32-l32
+project: pc-alm
+
+# Submit after the test image is built. The service resolves this tag to an
+# immutable digest before the run is admitted.
+image:
+  ref: us-docker.pkg.dev/flourish-gpu/flourish/pc-alm:latest
+
+entrypoint: >
+  mkdir -p /tmp/data/FashionMNIST/raw &&
+  gcloud storage cp
+  'gs://flourish-gpu-data/jacob/pc-alm/fashion-mnist-v1/*.gz'
+  /tmp/data/FashionMNIST/raw/ &&
+  python scripts/run_headline_grid.py
+  --config configs/headline_fashion.yaml
+  --widths 32 --depths 32 --activations relu --seeds 0
+  --methods bp,pc,pcalm --budget-rule 2L
+  --state-lr-table configs/eta_best_by_cell.csv
+  --output-dir /tmp/results/fashion_n32_l32
+  --data-dir /tmp/data --device cuda &&
+  cat /tmp/results/fashion_n32_l32/cells.csv
+
+env:
+  CUBLAS_WORKSPACE_CONFIG: ":4096:8"
+
+resources:
+  nodes: 1
+  gpus_per_node: 1
+  gpu_type: any
+  disk_gb: 20
+
+data:
+  output_logs: gs://flourish-runs/{run_id}/logs/
+
+scheduling:
+  queue: experiments
+  priority: 100
+  time_limit_hours: 2
+  max_restarts: 0
+  restart_policy: never

@@ -7,23 +7,49 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-import jax
-import jax.numpy as jnp
 import numpy as np
+import torch
 
 from .config import ExperimentConfig
 from .data import load_dataset
 from .inference import Schedule, bp_loss, method_grad
 from .metrics import mse_ce_accuracy, tree_cos
-from .model import activation_fn, init_params, logits, model_scales, skip_mask
-from .optim import adam_apply, adam_init
+from .model import Params, activation_fn, init_params, logits, model_scales, skip_mask
+from .optim import make_adam
 
 
-def train_one(config: ExperimentConfig, *, data_dir: str | Path = "data") -> dict[str, Any]:
+def resolve_device(device: str | torch.device | None) -> torch.device:
+    if device is None or str(device) == "auto":
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    resolved = torch.device(device)
+    if resolved.type == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError("CUDA was requested but torch.cuda.is_available() is false")
+    return resolved
+
+
+def configure_determinism() -> None:
+    torch.use_deterministic_algorithms(True)
+    torch.set_float32_matmul_precision("highest")
+    if torch.backends.cuda.is_built():
+        torch.backends.cuda.matmul.allow_tf32 = False
+
+
+def train_one(
+    config: ExperimentConfig,
+    *,
+    data_dir: str | Path = "data",
+    device: str | torch.device | None = None,
+) -> dict[str, Any]:
     model = config.model
     method = config.method
     training = config.training
-    learning_rate = adam_learning_rate(model.width, model.depth, training.eta0, training.gamma0, training.learning_rate)
+    resolved_device = resolve_device(device)
+    configure_determinism()
+    print(f"device={resolved_device}", flush=True)
+
+    learning_rate = adam_learning_rate(
+        model.width, model.depth, training.eta0, training.gamma0, training.learning_rate
+    )
     phi = activation_fn(model.activation)
     scales = model_scales(model.width, model.depth, model.input_dim)
     skips = skip_mask(model.depth)
@@ -37,16 +63,17 @@ def train_one(config: ExperimentConfig, *, data_dir: str | Path = "data") -> dic
         output_dim=model.output_dim,
     )
 
-    key = jax.random.PRNGKey(training.seed)
+    generator = torch.Generator(device=resolved_device.type).manual_seed(training.seed)
     params = init_params(
-        key,
+        generator,
         depth=model.depth,
         width=model.width,
         input_dim=model.input_dim,
         output_dim=model.output_dim,
-        dtype=jnp.float32,
+        dtype=torch.float32,
+        device=resolved_device,
     )
-    opt_state = adam_init(params)
+    optimizer = make_adam(params, learning_rate)
     schedule = Schedule(
         family=method.name,
         budget=method.budget,
@@ -55,19 +82,42 @@ def train_one(config: ExperimentConfig, *, data_dir: str | Path = "data") -> dic
         weight_credit_timing=method.weight_credit_timing,
     )
 
-    update = make_update_fn(schedule, scales, skips, phi, method.state_lr, method.rho, learning_rate)
-    eval_batch = make_eval_fn(scales, skips, phi)
-    diag_batch = make_diag_fn(schedule, scales, skips, phi, method.state_lr, method.rho)
+    update = make_update_fn(
+        schedule, scales, skips, phi, method.state_lr, method.rho, optimizer
+    )
     rows = []
     step = 0
     for epoch in range(training.epochs):
-        for batch_idx in batch_order(x_train.shape[0], training.batch_size, training.seed + epoch, training.drop_last):
-            xb = jnp.asarray(x_train[batch_idx])
-            yb = jnp.asarray(y_train[batch_idx])
-            params, opt_state = update(params, opt_state, xb, yb)
+        for batch_idx in batch_order(
+            x_train.shape[0],
+            training.batch_size,
+            training.seed + epoch,
+            training.drop_last,
+        ):
+            xb = torch.as_tensor(x_train[batch_idx], device=resolved_device)
+            yb = torch.as_tensor(y_train[batch_idx], device=resolved_device)
+            update(params, xb, yb)
             step += 1
-        train_mse, train_ce, train_acc = evaluate(params, x_train, y_train, training.batch_size, eval_batch)
-        test_mse, test_ce, test_acc = evaluate(params, x_test, y_test, training.batch_size, eval_batch)
+        train_mse, train_ce, train_acc = evaluate(
+            params,
+            x_train,
+            y_train,
+            training.batch_size,
+            scales,
+            skips,
+            phi,
+            resolved_device,
+        )
+        test_mse, test_ce, test_acc = evaluate(
+            params,
+            x_test,
+            y_test,
+            training.batch_size,
+            scales,
+            skips,
+            phi,
+            resolved_device,
+        )
         rows.append(
             {
                 "epoch": epoch + 1,
@@ -82,7 +132,17 @@ def train_one(config: ExperimentConfig, *, data_dir: str | Path = "data") -> dic
         )
 
     diag_n = min(training.batch_size, x_train.shape[0])
-    diag = diag_batch(params, jnp.asarray(x_train[:diag_n]), jnp.asarray(y_train[:diag_n]))
+    diag = make_diag(
+        params,
+        torch.as_tensor(x_train[:diag_n], device=resolved_device),
+        torch.as_tensor(y_train[:diag_n], device=resolved_device),
+        schedule,
+        scales,
+        skips,
+        phi,
+        method.state_lr,
+        method.rho,
+    )
     final = {
         "dataset": config.dataset,
         "method": method.name,
@@ -106,7 +166,7 @@ def train_one(config: ExperimentConfig, *, data_dir: str | Path = "data") -> dic
         "final_test_acc": rows[-1]["test_acc"],
         "final_train_mse": rows[-1]["train_mse"],
         "final_test_mse": rows[-1]["test_mse"],
-        "grad_cos_to_bp": float(diag["grad_cos_to_bp"]),
+        "grad_cos_to_bp": float(diag.detach().cpu()),
     }
     output_dir = Path(config.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -116,56 +176,78 @@ def train_one(config: ExperimentConfig, *, data_dir: str | Path = "data") -> dic
     return final
 
 
-def adam_learning_rate(width: int, depth: int, eta0: float, gamma0: float, explicit_lr: float | None) -> float:
+def adam_learning_rate(
+    width: int, depth: int, eta0: float, gamma0: float, explicit_lr: float | None
+) -> float:
     if gamma0 != 1.0:
-        raise ValueError("This reference implementation requires gamma0=1 (fixed model parameterization).")
+        raise ValueError(
+            "This reference implementation requires gamma0=1 (fixed model parameterization)."
+        )
     if explicit_lr is not None:
         return float(explicit_lr)
     return float(eta0 * (gamma0**2) * math.sqrt(width / depth))
 
 
-def make_update_fn(schedule: Schedule, scales, skips, phi, state_lr: float, rho: float, learning_rate: float):
-    @jax.jit
-    def update(params, opt_state, x, y):
-        grads = method_grad(params, scales, skips, x, y, schedule, state_lr=state_lr, rho=rho, phi=phi)
-        return adam_apply(params, grads, opt_state, learning_rate)
+def make_update_fn(
+    schedule: Schedule,
+    scales,
+    skips,
+    phi,
+    state_lr: float,
+    rho: float,
+    optimizer: torch.optim.Adam,
+):
+    def update(params: Params, x: torch.Tensor, y: torch.Tensor) -> None:
+        optimizer.zero_grad(set_to_none=True)
+        grads = method_grad(
+            params, scales, skips, x, y, schedule, state_lr=state_lr, rho=rho, phi=phi
+        )
+        for param, grad in zip(params, grads, strict=True):
+            param.grad = grad
+        optimizer.step()
 
     return update
 
 
-def make_eval_fn(scales, skips, phi):
-    @jax.jit
-    def eval_batch(params, x, y):
-        return mse_ce_accuracy(logits(params, scales, skips, x, phi), y)
-
-    return eval_batch
-
-
-def make_diag_fn(schedule: Schedule, scales, skips, phi, state_lr: float, rho: float):
-    @jax.jit
-    def diag(params, x, y):
-        bp_grads = jax.grad(lambda p: bp_loss(p, scales, skips, x, y, phi))(params)
-        method_grads = method_grad(params, scales, skips, x, y, schedule, state_lr=state_lr, rho=rho, phi=phi)
-        return {"grad_cos_to_bp": tree_cos(method_grads, bp_grads)}
-
-    return diag
+def make_diag(
+    params, x, y, schedule, scales, skips, phi, state_lr: float, rho: float
+) -> torch.Tensor:
+    bp_grads = torch.autograd.grad(bp_loss(params, scales, skips, x, y, phi), params)
+    method_grads = method_grad(
+        params, scales, skips, x, y, schedule, state_lr=state_lr, rho=rho, phi=phi
+    )
+    return tree_cos(method_grads, list(bp_grads))
 
 
-def evaluate(params, X: np.ndarray, Y: np.ndarray, batch_size: int, eval_batch) -> tuple[float, float, float]:
+def evaluate(
+    params: Params,
+    x_values: np.ndarray,
+    y_values: np.ndarray,
+    batch_size: int,
+    scales,
+    skips,
+    phi,
+    device: torch.device,
+) -> tuple[float, float, float]:
     totals = np.zeros(3, dtype=np.float64)
     count = 0
-    for start in range(0, X.shape[0], batch_size):
-        stop = min(start + batch_size, X.shape[0])
-        x = jnp.asarray(X[start:stop])
-        y = jnp.asarray(Y[start:stop])
-        mse, ce, acc = eval_batch(params, x, y)
-        n = stop - start
-        totals += np.array([float(mse), float(ce), float(acc)]) * n
-        count += n
+    with torch.inference_mode():
+        for start in range(0, x_values.shape[0], batch_size):
+            stop = min(start + batch_size, x_values.shape[0])
+            x = torch.as_tensor(x_values[start:stop], device=device)
+            y = torch.as_tensor(y_values[start:stop], device=device)
+            mse, ce, acc = mse_ce_accuracy(logits(params, scales, skips, x, phi), y)
+            n = stop - start
+            totals += (
+                np.array([float(mse.cpu()), float(ce.cpu()), float(acc.cpu())]) * n
+            )
+            count += n
     return tuple((totals / max(count, 1)).tolist())
 
 
-def batch_order(n: int, batch_size: int, seed: int, drop_last: bool) -> list[np.ndarray]:
+def batch_order(
+    n: int, batch_size: int, seed: int, drop_last: bool
+) -> list[np.ndarray]:
     rng = np.random.default_rng(seed)
     perm = rng.permutation(n)
     usable = (n // batch_size) * batch_size if drop_last else n

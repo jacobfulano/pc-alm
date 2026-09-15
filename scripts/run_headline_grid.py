@@ -22,18 +22,33 @@ def parse_csv_strings(text: str) -> list[str]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a small BP/PC/PC-ALM grid.")
-    parser.add_argument("--config", type=Path, default=Path("configs/headline_fashion.yaml"))
+    parser.add_argument(
+        "--config", type=Path, default=Path("configs/headline_fashion.yaml")
+    )
     parser.add_argument("--widths", default="8,16,32")
     parser.add_argument("--depths", default="8,16,32")
     parser.add_argument("--activations", default="linear,tanh,relu")
     parser.add_argument("--seeds", default="0,1,2")
     parser.add_argument("--methods", default="bp,pc,pcalm")
     parser.add_argument("--budget-rule", choices=["L", "2L"], default="2L")
-    parser.add_argument("--state-lr-depth-table", type=Path, default=Path("configs/eta_by_depth.csv"))
-    parser.add_argument("--state-lr-table", type=Path, help="Optional per-cell eta table (e.g. configs/eta_best_by_cell.csv); overrides depth table.")
-    parser.add_argument("--output-dir", type=Path, default=Path("results/headline_grid"))
+    parser.add_argument(
+        "--state-lr-depth-table", type=Path, default=Path("configs/eta_by_depth.csv")
+    )
+    parser.add_argument(
+        "--state-lr-table",
+        type=Path,
+        help="Optional per-cell eta table (e.g. configs/eta_best_by_cell.csv); overrides depth table.",
+    )
+    parser.add_argument(
+        "--output-dir", type=Path, default=Path("results/headline_grid")
+    )
     parser.add_argument("--data-dir", type=str, default="data")
-    parser.add_argument("--quick", action="store_true", help="Use tiny synthetic-sized subsets from the config for a smoke run.")
+    parser.add_argument(
+        "--quick",
+        action="store_true",
+        help="Use tiny synthetic-sized subsets from the config for a smoke run.",
+    )
+    parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
     return parser.parse_args()
 
 
@@ -58,21 +73,38 @@ def main() -> None:
                 )
                 for seed in seeds:
                     for method in methods:
-                        run_dir = args.output_dir / f"{base.dataset}_{activation}_n{width}_l{depth}_seed{seed}_{method}"
+                        run_dir = (
+                            args.output_dir
+                            / f"{base.dataset}_{activation}_n{width}_l{depth}_seed{seed}_{method}"
+                        )
                         cfg = replace(
                             base,
                             output_dir=str(run_dir),
-                            model=replace(base.model, width=width, depth=depth, activation=activation),
-                            method=replace(base.method, name=method, budget=budget if method != "bp" else 0, state_lr=state_lr),
+                            model=replace(
+                                base.model,
+                                width=width,
+                                depth=depth,
+                                activation=activation,
+                            ),
+                            method=replace(
+                                base.method,
+                                name=method,
+                                budget=budget if method != "bp" else 0,
+                                state_lr=state_lr,
+                            ),
                             training=replace(base.training, seed=seed),
                         )
                         if args.quick:
                             cfg = replace(
                                 cfg,
                                 dataset="synthetic",
-                                training=replace(cfg.training, train_subset=128, test_subset=64),
+                                training=replace(
+                                    cfg.training, train_subset=128, test_subset=64
+                                ),
                             )
-                        summary = train_one(cfg, data_dir=args.data_dir)
+                        summary = train_one(
+                            cfg, data_dir=args.data_dir, device=args.device
+                        )
                         rows.append(summary)
                         print(summary, flush=True)
     args.output_dir.mkdir(parents=True, exist_ok=True)
