@@ -79,14 +79,16 @@ uv run python scripts/run_headline_grid.py --config configs/headline_fashion.yam
   --output-dir results/repro_fashion_n32_l32 --data-dir data
 ```
 
-Expected results from the original JAX CPU reference run are shown below;
-framework and device differences can change the exact values:
+Results from the PyTorch CUDA reproduction at commit `6d1efd9` are shown below.
+The run used one epoch over the full Fashion-MNIST training set and the command
+above on the Flourish GPU `experiments` queue (run
+`pc-alm-fashion-n32-l32-1e2a`):
 
 | Method | Test accuracy | Gradient cosine to BP |
 |---|---:|---:|
-| BP | 78.66% | 1.000 |
-| PC | 68.13% | 0.604 |
-| PC-ALM | 77.75% | 0.909 |
+| BP | 77.02% | 1.000 |
+| PC | 63.76% | 0.548 |
+| PC-ALM | 76.31% | 0.942 |
 
 `configs/eta_best_by_cell.csv` contains the paper's frozen activity step sizes
 (`eta_h = 1/lambda_max`, median over seeds) for each dataset/activation/width/depth.

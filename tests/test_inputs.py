@@ -35,4 +35,6 @@ def test_missing_state_lr_table_is_rejected(tmp_path, loader):
 @pytest.mark.parametrize("explicit_lr", [None, 5e-4])
 def test_unsupported_gamma0_is_rejected(explicit_lr):
     with pytest.raises(ValueError, match="gamma0=1"):
-        adam_learning_rate(width=32, depth=32, eta0=1e-3, gamma0=2.0, explicit_lr=explicit_lr)
+        adam_learning_rate(
+            width=32, depth=32, eta0=1e-3, gamma0=2.0, explicit_lr=explicit_lr
+        )
