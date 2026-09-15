@@ -9,9 +9,10 @@ image:
 
 entrypoint: >
   mkdir -p /tmp/data/FashionMNIST/raw &&
-  gcloud storage cp
-  'gs://flourish-gpu-data/jacob/pc-alm/fashion-mnist-v1/*.gz'
-  /tmp/data/FashionMNIST/raw/ &&
+  python scripts/download_gcs_data.py
+  --bucket flourish-gpu-data
+  --prefix jacob/pc-alm/fashion-mnist-v1/
+  --output-dir /tmp/data/FashionMNIST/raw &&
   python scripts/run_headline_grid.py
   --config configs/headline_fashion.yaml
   --widths 32 --depths 32 --activations relu --seeds 0

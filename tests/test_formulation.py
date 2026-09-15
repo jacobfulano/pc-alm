@@ -51,7 +51,7 @@ def test_constraints_are_hidden_edges_only():
     residuals = constraint_residuals(params, scales, skips, x, free, phi)
     assert len(residuals) == len(params) - 1
     assert all(residual.shape == (x.shape[0], 5) for residual in residuals)
-    assert all(residual.device == DEVICE for residual in residuals)
+    assert all(residual.device.type == DEVICE.type for residual in residuals)
 
 
 def test_pc_has_zero_duals():
